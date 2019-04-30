@@ -636,8 +636,8 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
             tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
 
         tree.updateInnerOccupancy();
-        tree.write(filename);
-        cout << endl << "Converting point cloud into color octomap done." << endl;
+        tree.writeBinary( filename );
+        cout << endl << "Converting point cloud into octomap done." << endl;
     }
 
 } //namespace ORB_SLAM
