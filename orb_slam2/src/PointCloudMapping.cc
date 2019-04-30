@@ -17,15 +17,16 @@
 #include "Eigen/Dense"
 #include "Eigen/Geometry"
 
+
 PointCloudMapping::PointCloudMapping(double resolution_)
 {
     this->resolution = resolution_;
     voxel.setLeafSize(resolution, resolution, resolution);
 
     globalMap = boost::make_shared<PointCloud>();
-    OptimizedGlobalMap = boost::make_shared<PointCloud>();
     viewerThread = make_shared<thread>(bind(&PointCloudMapping::viewer, this));
 }
+
 
 void PointCloudMapping::insertKeyFrame(KeyFrame *kf, cv::Mat &color, cv::Mat &depth)
 {
@@ -48,6 +49,7 @@ void PointCloudMapping::shutdown()
     }
     viewerThread->detach();
 }
+
 
 void PointCloudMapping::viewer()
 {
@@ -89,21 +91,18 @@ void PointCloudMapping::viewer()
         {
             cout<<"point cloud saved, point size="<<globalMap->points.size()<<endl;
             pcl::io::savePCDFileBinary ( "PointCloud.pcd", *globalMap );
-
-            octomap::ColorOcTree tree(0.05);
-
-            for (auto p:(*globalMap).points)
-                tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
-
-            for (auto p:(*globalMap).points)
-                tree.integrateNodeColor( p.x, p.y, p.z, p.r, p.g, p.b );
-            tree.updateInnerOccupancy();
-            tree.write("Octomap.ot");
-
-            boost::this_thread::sleep(boost::posix_time::microseconds (5000));
+            //octomap::ColorOcTree tree(0.05);
+            //for (auto p:(*globalMap).points)
+            //    tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
+            //for (auto p:(*globalMap).points)
+            //    tree.integrateNodeColor( p.x, p.y, p.z, p.r, p.g, p.b );
+            //tree.updateInnerOccupancy();
+            //tree.write("Octomap.ot");
+            //boost::this_thread::sleep(boost::posix_time::microseconds (5000));
         }
     }
 }
+
 
 pcl::PointCloud<PointCloudMapping::PointT>::Ptr PointCloudMapping::generatePointCloud(KeyFrame *kf, cv::Mat &color, cv::Mat &depth)
 {
@@ -115,61 +114,37 @@ pcl::PointCloud<PointCloudMapping::PointT>::Ptr PointCloudMapping::generatePoint
             float d = depth.ptr<float>(i)[j];
             if (d < 0.01 || d > 10.0 || isnan(d))
                 continue;
-
             PointT p;
-
             p.z = d;
             p.x = (j - kf->cx) * p.z / kf->fx;
             p.y = (i - kf->cy) * p.z / kf->fy;
-
             p.r = color.ptr<uchar>(i)[j*3];
             p.g = color.ptr<uchar>(i)[j*3+1];
             p.b = color.ptr<uchar>(i)[j*3+2];
-
             tmp->points.push_back(p);
         }
     }
 
     std::vector<int> mapping;
     pcl::removeNaNFromPointCloud(*tmp, *tmp, mapping);
-
     Eigen::Isometry3d T = Converter::toSE3Quat(kf->GetPose());
     PointCloud::Ptr cloud(new PointCloud);
 
     pcl::transformPointCloud(*tmp, *cloud, T.inverse().matrix());
     cloud->is_dense = false;
-
     return cloud;
 }
 
-
-void PointCloudMapping::SavePointCloudMap(const string &filename)
+vector<KeyFrame*> PointCloudMapping::GetKeyFrames()
 {
-    for(size_t i=0;i<keyframes.size();i++)                               // save the optimized pointcloud
-    {
-        if(i%10==0)
-            cout<<"keyframe "<<i<<" ..."<<endl;
-        PointCloud::Ptr tp = generatePointCloud( keyframes[i], colorImgs[i], depthImgs[i] );
-        PointCloud::Ptr tmp(new PointCloud());
-        voxel.setInputCloud( tp );
-        voxel.filter( *tmp );
-        *OptimizedGlobalMap += *tmp;
-    }
-    pcl::io::savePCDFileBinary ( "/home/wangyang/exp_res/PointCloud.pcd", *OptimizedGlobalMap );
-    cout<<endl<<"Save point cloud file successfully!"<<endl;
+    return keyframes;
 }
-
-void PointCloudMapping::SaveOctoMap(const string &filename)
+vector<cv::Mat> PointCloudMapping::GetColorImgs()
 {
-    octomap::ColorOcTree tree(0.05);
-    for (auto p:(*OptimizedGlobalMap).points)
-        tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
-
-    for (auto p:(*OptimizedGlobalMap).points)
-        tree.integrateNodeColor( p.x, p.y, p.z, p.r, p.g, p.b );
-
-    tree.updateInnerOccupancy();
-    tree.write("/home/wangyang/exp_res/OctoMap.ot");
-    cout << endl << "Converting point cloud into color octomap done." << endl;
+    return colorImgs;
+}
+vector<cv::Mat> PointCloudMapping::GetDepthImgs()
+{
+    return depthImgs;
 }
 

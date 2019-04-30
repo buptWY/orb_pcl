@@ -27,10 +27,14 @@
 #include <unistd.h>
 #include <opencv2/core/core.hpp>
 
-#include <pcl/io/pcd_io.h>
-#include <pcl/point_cloud.h>
 #include <pcl/common/transforms.h>
 #include <pcl/point_types.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/visualization/pcl_visualizer.h>
+
+#include <octomap/octomap.h>
+#include <octomap/ColorOcTree.h>
 
 #include "Tracking.h"
 #include "FrameDrawer.h"
@@ -52,151 +56,156 @@ namespace ORB_SLAM2
     class LocalMapping;
     class LoopClosing;
 
-
     class System
-            {
-            public:
-                // Input sensor
-                enum eSensor
-                 {
-                    MONOCULAR=0,
-                    STEREO=1,
-                    RGBD=2
-                 };
-            public:
-                // Initialize the SLAM system. It launches the Local Mapping, Loop Closing and Viewer threads.
-                System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor);
+    {
+    public:
+        // Input sensor
+        enum eSensor
+        {
+            MONOCULAR=0,
+            STEREO=1,
+            RGBD=2
+        };
+        typedef pcl::PointXYZ PointT;
+        typedef pcl::PointCloud<PointT> PointCloud;
 
-                // Proccess the given stereo frame. Images must be synchronized and rectified.
-                // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
-                // Returns the camera pose (empty if tracking fails).
-                void TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp);
+    public:
+        // Initialize the SLAM system. It launches the Local Mapping, Loop Closing and Viewer threads.
+        System(const string &strVocFile, const string &strSettingsFile, const eSensor sensor);
 
-                // Process the given rgbd frame. Depthmap must be registered to the RGB frame.
-                // Input image: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
-                // Input depthmap: Float (CV_32F).
-                // Returns the camera pose (empty if tracking fails).
-                void TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp);
+        // Proccess the given stereo frame. Images must be synchronized and rectified.
+        // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
+        // Returns the camera pose (empty if tracking fails).
+        void TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp);
 
-                // Proccess the given monocular frame
-                // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
-                // Returns the camera pose (empty if tracking fails).
-                void TrackMonocular(const cv::Mat &im, const double &timestamp);
+        // Process the given rgbd frame. Depthmap must be registered to the RGB frame.
+        // Input image: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
+        // Input depthmap: Float (CV_32F).
+        // Returns the camera pose (empty if tracking fails).
+        void TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp);
 
-                // Returns true if there have been a big map change (loop closure, global BA)
-                // since last call to this function
-                bool MapChanged();
+        // Proccess the given monocular frame
+        // Input images: RGB (CV_8UC3) or grayscale (CV_8U). RGB is converted to grayscale.
+        // Returns the camera pose (empty if tracking fails).
+        void TrackMonocular(const cv::Mat &im, const double &timestamp);
 
-                // Reset the system (clear map)
-                void Reset();
+        // Returns true if there have been a big map change (loop closure, global BA)
+        // since last call to this function
+        bool MapChanged();
 
-                // All threads will be requested to finish.
-                // It waits until all threads have finished.
-                // This function must be called before saving the trajectory.
-                void Shutdown();
+        // Reset the system (clear map)
+        void Reset();
 
-                // Save camera trajectory in the TUM RGB-D dataset format.
-                // Only for stereo and RGB-D. This method does not work for monocular.
-                // Call first Shutdown()
-                // See format details at: http://vision.in.tum.de/data/datasets/rgbd-dataset
-                void SaveTrajectoryTUM(const string &filename);
+        // All threads will be requested to finish.
+        // It waits until all threads have finished.
+        // This function must be called before saving the trajectory.
+        void Shutdown();
 
-                // Save keyframe poses in the TUM RGB-D dataset format.
-                // This method works for all sensor input.
-                // Call first Shutdown()
-                // See format details at: http://vision.in.tum.de/data/datasets/rgbd-dataset
-                void SaveKeyFrameTrajectoryTUM(const string &filename);
+        // Save camera trajectory in the TUM RGB-D dataset format.
+        // Only for stereo and RGB-D. This method does not work for monocular.
+        // Call first Shutdown()
+        // See format details at: http://vision.in.tum.de/data/datasets/rgbd-dataset
+        void SaveTrajectoryTUM(const string &filename);
 
-                // Save camera trajectory in the KITTI dataset format.
-                // Only for stereo and RGB-D. This method does not work for monocular.
-                // Call first Shutdown()
-                // See format details at: http://www.cvlibs.net/datasets/kitti/eval_odometry.php
-                void SaveTrajectoryKITTI(const string &filename);
+        // Save keyframe poses in the TUM RGB-D dataset format.
+        // This method works for all sensor input.
+        // Call first Shutdown()
+        // See format details at: http://vision.in.tum.de/data/datasets/rgbd-dataset
+        void SaveKeyFrameTrajectoryTUM(const string &filename);
 
-                void SavePointCloudMap(const string &filename);
+        // Save camera trajectory in the KITTI dataset format.
+        // Only for stereo and RGB-D. This method does not work for monocular.
+        // Call first Shutdown()
+        // See format details at: http://www.cvlibs.net/datasets/kitti/eval_odometry.php
+        void SaveTrajectoryKITTI(const string &filename);
 
-                void SaveOctoMap(const string &filename);
+        void SavePointCloudMap(const string &filename);
 
-                //Checks the current mode (mapping or localization) and changes the mode if requested
-                void EnableLocalizationOnly (bool localize_only);
+        void SaveOctoMap(const string &filename);
 
-                // TODO: Save/Load functions
-                // SaveMap(const string &filename);
-                // LoadMap(const string &filename);
+        //Checks the current mode (mapping or localization) and changes the mode if requested
+        void EnableLocalizationOnly (bool localize_only);
 
-                //Save Point Cloud file
-                void save(const string& filename);
+        // TODO: Save/Load functions
+        // SaveMap(const string &filename);
+        // LoadMap(const string &filename);
 
-                void SetMinimumKeyFrames (int min_num_kf);
+        void SetMinimumKeyFrames (int min_num_kf);
 
-                cv::Mat GetCurrentPosition ();
+        cv::Mat GetCurrentPosition ();
 
-                // Information from most recent processed frame
-                // You can call this right after TrackMonocular (or stereo or RGBD)
-                int GetTrackingState();
-                std::vector<MapPoint*> GetTrackedMapPoints();
-                std::vector<cv::KeyPoint> GetTrackedKeyPointsUn();
+        // Information from most recent processed frame
+        // You can call this right after TrackMonocular (or stereo or RGBD)
+        int GetTrackingState();
+        std::vector<MapPoint*> GetTrackedMapPoints();
+        std::vector<cv::KeyPoint> GetTrackedKeyPointsUn();
 
-                cv::Mat DrawCurrentFrame ();
+        cv::Mat DrawCurrentFrame ();
 
-                std::vector<MapPoint*> GetAllMapPoints();
-            private:
-                // This stops local mapping thread (map building) and performs only camera tracking.
-                void ActivateLocalizationMode();
+        std::vector<MapPoint*> GetAllMapPoints();
 
-                // This resumes local mapping thread and performs SLAM again.
-                void DeactivateLocalizationMode();
+    private:
+        //PointCloud::Ptr generatePointCloud(KeyFrame* kf, cv::Mat& color, cv::Mat& depth);
+        PointCloud::Ptr generatePointCloud(KeyFrame* kf, cv::Mat& depth);
+        // This stops local mapping thread (map building) and performs only camera tracking.
+        void ActivateLocalizationMode();
 
-                bool currently_localizing_only_;
+        // This resumes local mapping thread and performs SLAM again.
+        void DeactivateLocalizationMode();
 
-                // Input sensor
-                eSensor mSensor;
+        bool currently_localizing_only_;
 
-                // ORB vocabulary used for place recognition and feature matching.
-                ORBVocabulary* mpVocabulary;
+        // Input sensor
+        eSensor mSensor;
 
-                // KeyFrame database for place recognition (relocalization and loop detection).
-                KeyFrameDatabase* mpKeyFrameDatabase;
+        // ORB vocabulary used for place recognition and feature matching.
+        ORBVocabulary* mpVocabulary;
 
-                // Map structure that stores the pointers to all KeyFrames and MapPoints.
-                Map* mpMap;
+        // KeyFrame database for place recognition (relocalization and loop detection).
+        KeyFrameDatabase* mpKeyFrameDatabase;
 
-                // Tracker. It receives a frame and computes the associated camera pose.
-                // It also decides when to insert a new keyframe, create some new MapPoints and
-                // performs relocalization if tracking fails.
-                Tracking* mpTracker;
+        // Map structure that stores the pointers to all KeyFrames and MapPoints.
+        Map* mpMap;
 
-                // Local Mapper. It manages the local map and performs local bundle adjustment.
-                LocalMapping* mpLocalMapper;
+        // Tracker. It receives a frame and computes the associated camera pose.
+        // It also decides when to insert a new keyframe, create some new MapPoints and
+        // performs relocalization if tracking fails.
+        Tracking* mpTracker;
 
-                // Loop Closer. It searches loops with every new keyframe. If there is a loop it performs
-                // a pose graph optimization and full bundle adjustment (in a new thread) afterwards.
-                LoopClosing* mpLoopCloser;
+        // Local Mapper. It manages the local map and performs local bundle adjustment.
+        LocalMapping* mpLocalMapper;
 
-                FrameDrawer* mpFrameDrawer;
+        // Loop Closer. It searches loops with every new keyframe. If there is a loop it performs
+        // a pose graph optimization and full bundle adjustment (in a new thread) afterwards.
+        LoopClosing* mpLoopCloser;
 
-                // System threads: Local Mapping, Loop Closing, PointCloudMapping.
-                // The Tracking thread "lives" in the main execution thread that creates the System object.
-                std::thread* mptLocalMapping;
-                std::thread* mptLoopClosing;
-                shared_ptr<PointCloudMapping> mpPointCloudMapping;
-                // Reset flag
-                std::mutex mMutexReset;
-                bool mbReset;
+        FrameDrawer* mpFrameDrawer;
 
-                // Change mode flags
-                std::mutex mMutexMode;
-                bool mbActivateLocalizationMode;
-                bool mbDeactivateLocalizationMode;
+        // System threads: Local Mapping, Loop Closing, PointCloudMapping.
+        // The Tracking thread "lives" in the main execution thread that creates the System object.
+        std::thread* mptLocalMapping;
+        std::thread* mptLoopClosing;
+        shared_ptr<PointCloudMapping> mpPointCloudMapping;
 
-                // Tracking state
-                int mTrackingState;
-                std::vector<MapPoint*> mTrackedMapPoints;
-                std::vector<cv::KeyPoint> mTrackedKeyPointsUn;
-                std::mutex mMutexState;
+        // Reset flag
+        std::mutex mMutexReset;
+        bool mbReset;
 
-                // Current position
-                cv::Mat current_position_;
-            };
+        // Change mode flags
+        std::mutex mMutexMode;
+        bool mbActivateLocalizationMode;
+        bool mbDeactivateLocalizationMode;
+
+        // Tracking state
+        int mTrackingState;
+        std::vector<MapPoint*> mTrackedMapPoints;
+        std::vector<cv::KeyPoint> mTrackedKeyPointsUn;
+        std::mutex mMutexState;
+
+        // Current position
+        cv::Mat current_position_;
+        PointCloud::Ptr PointCloudMap;
+        pcl::VoxelGrid<PointT> voxel;
+    };
 }// namespace ORB_SLAM
 #endif // SYSTEM_H

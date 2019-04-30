@@ -122,6 +122,9 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     mpLoopCloser->SetLocalMapper(mpLocalMapper);
 
     currently_localizing_only_ = false;
+
+    PointCloudMap = boost::make_shared<PointCloud>();
+    voxel.setLeafSize(0.05, 0.05, 0.05);
 }
 
 void System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp)
@@ -530,11 +533,111 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
 
     void System::SavePointCloudMap(const string &filename)
     {
-        mpPointCloudMapping->SavePointCloudMap(filename);
+        vector<KeyFrame*> keyframes = mpPointCloudMapping->GetKeyFrames();
+        //vector<cv::Mat> colorImgs = mpPointCloudMapping->GetColorImgs();
+        vector<cv::Mat> depthImgs = mpPointCloudMapping->GetDepthImgs();
+        ;
+
+        for(size_t i=0;i<keyframes.size();i++)// save the optimized pointcloud
+        {
+            //PointCloud::Ptr tp = generatePointCloud( keyframes[i], colorImgs[i], depthImgs[i] );
+            PointCloud::Ptr tp = generatePointCloud( keyframes[i], depthImgs[i] );
+            *PointCloudMap += *tp;
+            tp->clear();
+        }
+        PointCloud::Ptr tmp(new PointCloud());
+        voxel.setInputCloud( PointCloudMap );
+        voxel.filter( *tmp );
+        PointCloudMap->swap( *tmp );
+        pcl::io::savePCDFileBinary (filename, *PointCloudMap );
+        cout<<endl<<"Save point cloud file successfully!"<<endl;
+    }
+    /*
+    void System::SaveOctoMap(const string &filename)
+    {
+        octomap::ColorOcTree tree(0.05);
+        for (auto p:(*PointCloudMap).points)
+            tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
+
+        for (auto p:(*PointCloudMap).points)
+            tree.integrateNodeColor( p.x, p.y, p.z, p.r, p.g, p.b );
+
+        tree.updateInnerOccupancy();
+        tree.write(filename);
+        cout << endl << "Converting point cloud into color octomap done." << endl;
+    }
+
+    pcl::PointCloud<PointT>::Ptr System::generatePointCloud(KeyFrame *kf, cv::Mat &color, cv::Mat &depth)
+    {
+        PointCloud::Ptr tmp(new PointCloud());
+        for (int i = 0; i < depth.rows; i += 3)
+        {
+            for (int j = 0; j < depth.cols; j += 3)
+            {
+                float d = depth.ptr<float>(i)[j];
+                if (d < 0.01 || d > 10.0 || isnan(d))
+                    continue;
+                PointT p;
+                p.z = d;
+                p.x = (j - kf->cx) * p.z / kf->fx;
+                p.y = (i - kf->cy) * p.z / kf->fy;
+
+                p.r = color.ptr<uchar>(i)[j*3];
+                p.g = color.ptr<uchar>(i)[j*3+1];
+                p.b = color.ptr<uchar>(i)[j*3+2];
+
+                 tmp->points.push_back(p);
+            }
+        }
+
+
+        std::vector<int> mapping;
+        pcl::removeNaNFromPointCloud(*tmp, *tmp, mapping);
+        Eigen::Isometry3d T = Converter::toSE3Quat(kf->GetPose());
+        PointCloud::Ptr cloud(new PointCloud);
+
+        pcl::transformPointCloud(*tmp, *cloud, T.inverse().matrix());
+        cloud->is_dense = false;
+        return cloud;
+    }
+    */
+
+    pcl::PointCloud<System::PointT>::Ptr System::generatePointCloud(KeyFrame *kf, cv::Mat &depth)
+    {
+        PointCloud::Ptr tmp(new PointCloud());
+        for (int i = 0; i < depth.rows; i += 3)
+        {
+            for (int j = 0; j < depth.cols; j += 3)
+            {
+                float d = depth.ptr<float>(i)[j];
+                if (d < 0.01 || d > 10.0 || isnan(d))
+                    continue;
+                PointT p;
+                p.z = d;
+                p.x = (j - kf->cx) * p.z / kf->fx;
+                p.y = (i - kf->cy) * p.z / kf->fy;
+
+                tmp->points.push_back(p);
+            }
+        }
+
+        Eigen::Isometry3d T = Converter::toSE3Quat(kf->GetPose());
+        PointCloud::Ptr cloud(new PointCloud);
+
+        pcl::transformPointCloud(*tmp, *cloud, T.inverse().matrix());
+        cloud->is_dense = false;
+        return cloud;
     }
 
     void System::SaveOctoMap(const string &filename)
     {
-        mpPointCloudMapping->SavePointCloudMap(filename);
+        octomap::OcTree tree(0.05);
+        for (auto p:(*PointCloudMap).points)
+            tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
+
+        tree.updateInnerOccupancy();
+        tree.write(filename);
+        cout << endl << "Converting point cloud into color octomap done." << endl;
     }
+
 } //namespace ORB_SLAM
