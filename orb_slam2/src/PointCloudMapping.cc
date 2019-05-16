@@ -20,13 +20,53 @@
 
 PointCloudMapping::PointCloudMapping(double resolution_)
 {
-    this->resolution = resolution_;
-    voxel.setLeafSize(resolution, resolution, resolution);
+    mResolution = resolution_;
+    mVoxel.setLeafSize(mResolution, mResolution, mResolution);
 
-    globalMap = boost::make_shared<PointCloud>();
-    viewerThread = make_shared<thread>(bind(&PointCloudMapping::viewer, this));
+    mpPointCloudMap = boost::make_shared<PointCloud> ();
+
+    mTransCam2Ground.setIdentity();
+    mTransCam2Ground(0,0) = 0.0;
+    mTransCam2Ground(0,1) = 0.0;
+    mTransCam2Ground(0,2) = 1.0;
+    mTransCam2Ground(0,3) = 0.0;
+    mTransCam2Ground(1,0) = -1.0;
+    mTransCam2Ground(1,1) = 0.0;
+    mTransCam2Ground(1,2) = 0.0;
+    mTransCam2Ground(1,3) = 0.0;
+    mTransCam2Ground(2,0) = 0.0;
+    mTransCam2Ground(2,1) = -1.0;
+    mTransCam2Ground(2,2) = 0.0;
+    mTransCam2Ground(2,3) = 0.0;
+
+    mbFinishRequested = false;
+    mbFinished = false;
+    mutexOfPCL = false;   //lock the thread
 }
 
+void PointCloudMapping::RequestFinish()
+{
+    unique_lock<mutex> lock(mMutexFinish);
+    mbFinishRequested = true;
+}
+
+bool PointCloudMapping::CheckFinish()
+{
+    unique_lock<mutex> lock(mMutexFinish);
+    return mbFinishRequested;
+}
+
+void PointCloudMapping::SetFinish()
+{
+    unique_lock<mutex> lock(mMutexFinish);
+    mbFinished = true;
+}
+
+bool PointCloudMapping::isFinished()
+{
+    unique_lock<mutex> lock(mMutexFinish);
+    return mbFinished;
+}
 
 void PointCloudMapping::insertKeyFrame(KeyFrame *kf, cv::Mat &color, cv::Mat &depth)
 {
@@ -35,116 +75,101 @@ void PointCloudMapping::insertKeyFrame(KeyFrame *kf, cv::Mat &color, cv::Mat &de
     colorImgs.push_back(color.clone());
     depthImgs.push_back(depth.clone());
 
-    keyFrameUpdated.notify_one();
+    mutexOfPCL=true;    //the flag set to start mapping
 }
-
-void PointCloudMapping::shutdown()
-{
-    cout<<endl<<"--PointCloud Viewer ShutDown!"<<endl;
-    {
-        unique_lock <mutex> lck(shutDownMutex);
-        shutDownFlag = true;
-        unique_lock <mutex> lck2(keyframeMutex);
-        keyFrameUpdated.notify_one();
-    }
-    viewerThread->detach();
-}
-
-
-void PointCloudMapping::viewer()
-{
-    while (1)
-    {
-        {
-            unique_lock <mutex> lck_shutdown(shutDownMutex);
-            if (shutDownFlag)
-            {
-                break;
-            }
-        }
-        {
-            unique_lock <mutex> lck_keyframeUpdated(keyFrameUpdateMutex);
-            keyFrameUpdated.wait(lck_keyframeUpdated);
-        }
-
-        //keyframe is updated
-        size_t N = 0;
-        {
-            unique_lock <mutex> lck(keyframeMutex);
-            N = keyframes.size();
-        }
-
-        for (size_t i = lastKeyframeSize; i < N; i++)
-        {
-            PointCloud::Ptr p = generatePointCloud(keyframes[i], colorImgs[i], depthImgs[i]);
-            *globalMap += *p;
-            p->clear();
-        }
-
-        PointCloud::Ptr tmp(new PointCloud());
-        voxel.setInputCloud(globalMap);
-        voxel.filter(*tmp);
-        globalMap->swap(*tmp);
-        lastKeyframeSize = N;
-
-        if(N%20==0)
-        {
-            cout<<"point cloud saved, point size="<<globalMap->points.size()<<endl;
-            pcl::io::savePCDFileBinary ( "PointCloud.pcd", *globalMap );
-            //octomap::ColorOcTree tree(0.05);
-            //for (auto p:(*globalMap).points)
-            //    tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
-            //for (auto p:(*globalMap).points)
-            //    tree.integrateNodeColor( p.x, p.y, p.z, p.r, p.g, p.b );
-            //tree.updateInnerOccupancy();
-            //tree.write("Octomap.ot");
-            //boost::this_thread::sleep(boost::posix_time::microseconds (5000));
-        }
-    }
-}
-
 
 pcl::PointCloud<PointCloudMapping::PointT>::Ptr PointCloudMapping::generatePointCloud(KeyFrame *kf, cv::Mat &color, cv::Mat &depth)
 {
     PointCloud::Ptr tmp(new PointCloud());
-    for (int i = 0; i < depth.rows; i += 3)
+    for (int i = 0; i < depth.rows; i += 5)
     {
-        for (int j = 0; j < depth.cols; j += 3)
+        for (int j = 0; j < depth.cols; j += 5)
         {
             float d = depth.ptr<float>(i)[j];
-            if (d < 0.01 || d > 10.0 || isnan(d))
+            std::cout<<d<<std::endl;
+            if (d < 0.01 || d > 4.0 || isnan(d))
                 continue;
             PointT p;
             p.z = d;
             p.x = (j - kf->cx) * p.z / kf->fx;
             p.y = (i - kf->cy) * p.z / kf->fy;
-            p.r = color.ptr<uchar>(i)[j*3];
-            p.g = color.ptr<uchar>(i)[j*3+1];
-            p.b = color.ptr<uchar>(i)[j*3+2];
+
+            //if (p.x < -4.0 || p.x>4.0)     //pointcloud filter, 5m is farest boundary
+            //    continue;
+            //if (p.y < -4.0 || p.y>4.0)
+            //    continue;
+
+            p.r = uchar(color.at<cv::Vec3b>(i,j)[0]);
+            p.g = uchar(color.at<cv::Vec3b>(i,j)[1]);
+            p.b = uchar(color.at<cv::Vec3b>(i,j)[2]);
             tmp->points.push_back(p);
         }
     }
 
-    std::vector<int> mapping;
-    pcl::removeNaNFromPointCloud(*tmp, *tmp, mapping);
     Eigen::Isometry3d T = Converter::toSE3Quat(kf->GetPose());
-    PointCloud::Ptr cloud(new PointCloud);
+    PointCloud::Ptr cloud(new PointCloud());
 
     pcl::transformPointCloud(*tmp, *cloud, T.inverse().matrix());
     cloud->is_dense = false;
     return cloud;
 }
 
+
+void PointCloudMapping::Run()
+{
+    while (1)
+    {
+        if(mutexOfPCL)
+        {
+            size_t N = 0;
+            {
+                unique_lock <mutex> lck(keyframeMutex);
+                N = keyframes.size();
+            }
+            for (size_t i = lastKeyframeSize; i < N; i++)
+            {
+                PointCloud::Ptr p = generatePointCloud(keyframes[i], colorImgs[i], depthImgs[i]);
+                *mpPointCloudMap += *p;
+                p->clear();
+            }
+            PointCloud::Ptr tmp(new PointCloud());
+            mVoxel.setInputCloud(mpPointCloudMap);
+            mVoxel.filter(*tmp);
+            mpPointCloudMap->swap(*tmp);
+            lastKeyframeSize = N;
+            tmp->clear();
+        }
+        mutexOfPCL = false;
+        if(CheckFinish())
+            break;
+        usleep(20);
+    }
+    PointCloud::Ptr tmp(new PointCloud());
+    pcl::transformPointCloud(*mpPointCloudMap, *tmp, mTransCam2Ground.matrix());
+    mpPointCloudMap->swap(*tmp);
+    tmp->clear();
+    pcl::io::savePCDFileBinary ( "/home/wangyang/result/IncrementalPointCloud.pcd", *mpPointCloudMap );
+
+    SetFinish();
+}
+
+
+
 vector<KeyFrame*> PointCloudMapping::GetKeyFrames()
 {
+    unique_lock <mutex> lck(keyframeMutex);
     return keyframes;
 }
-vector<cv::Mat> PointCloudMapping::GetColorImgs()
-{
-    return colorImgs;
-}
+
+
 vector<cv::Mat> PointCloudMapping::GetDepthImgs()
 {
+    unique_lock <mutex> lck(keyframeMutex);
     return depthImgs;
 }
 
+vector<cv::Mat> PointCloudMapping::GetColorImgs()
+{
+    unique_lock <mutex> lck(keyframeMutex);
+    return colorImgs;
+}

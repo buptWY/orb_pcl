@@ -41,6 +41,7 @@ public:
     static cv::Mat toCvMat(const g2o::SE3Quat &SE3);
     static cv::Mat toCvMat(const g2o::Sim3 &Sim3);
     static cv::Mat toCvMat(const Eigen::Matrix<double,4,4> &m);
+    static cv::Mat toCvMat(const Eigen::Matrix4f &m);
     static cv::Mat toCvMat(const Eigen::Matrix3d &m);
     static cv::Mat toCvMat(const Eigen::Matrix<double,3,1> &m);
     static cv::Mat toCvSE3(const Eigen::Matrix<double,3,3> &R, const Eigen::Matrix<double,3,1> &t);

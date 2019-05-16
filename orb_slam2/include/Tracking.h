@@ -52,8 +52,8 @@ namespace ORB_SLAM2
     class Tracking
             {
             public:
-                Tracking(System* pSys, ORBVocabulary* pVoc, FrameDrawer* pFrameDrawer, Map* pMap, shared_ptr<PointCloudMapping> pPointCloud,
-                        KeyFrameDatabase* pKFDB, const string &strSettingPath, const int sensor);
+                Tracking(System* pSys, ORBVocabulary* pVoc, FrameDrawer* pFrameDrawer, Map* pMap, KeyFrameDatabase* pKFDB,
+                        const string &strSettingPath, const int sensor);
 
                 // Preprocess the input and call Track(). Extract features and performs stereo matching.
                 cv::Mat GrabImageStereo(const cv::Mat &imRectLeft,const cv::Mat &imRectRight, const double &timestamp);
@@ -63,7 +63,7 @@ namespace ORB_SLAM2
                 void SetLocalMapper(LocalMapping* pLocalMapper);
                 void SetLoopClosing(LoopClosing* pLoopClosing);
                 void SetMinimumKeyFrames (int min_num_kf) {mnMinimumKeyFrames = min_num_kf;}
-
+                void SetPointCloudMapping(PointCloudMapping* pPointCloudMapper);
                 // Load new settings
                 // The focal lenght should be similar or scale prediction will fail when projecting points
                 // TODO: Modify MapPoint::PredictScale to take into account focal lenght
@@ -155,7 +155,7 @@ namespace ORB_SLAM2
                 //Other Thread Pointers
                 LocalMapping* mpLocalMapper;
                 LoopClosing* mpLoopClosing;
-                shared_ptr<PointCloudMapping> mpPointCloudMapping;
+                PointCloudMapping* mpPointCloudMapper;
 
                 //ORB
                 ORBextractor* mpORBextractorLeft, *mpORBextractorRight;

@@ -25,9 +25,8 @@ int main(int argc, char **argv)
     SLAM.Shutdown();
 
     // Save camera trajectory
-    SLAM.SaveKeyFrameTrajectoryTUM("/home/wangyang/res/KeyFrameTrajectory.txt");
-    SLAM.SavePointCloudMap("/home/wangyang/res/PointCloudMap.pcd");
-    SLAM.SaveOctoMap("/home/wangyang/res/Octomap.bt");
+    SLAM.SaveKeyFrameTrajectoryTUM("/home/wangyang/result/KeyFrameTrajectory.txt");
+    SLAM.SavePointCloudMap("/home/wangyang/result/GlobalPointCloudMap.pcd");
 
     ros::shutdown();
     return 0;

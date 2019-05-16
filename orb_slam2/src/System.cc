@@ -58,7 +58,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
     // for point cloud resolution
     float resolution = fsSettings["PointCloudMapping.Resolution"];
-    cout<<endl<<"PointCloudMapping.Resolution:  "<<resolution<<endl;
+    cout << endl<< "PointCloudMapping.Resolution:  "<< resolution << endl;
 
     //Load ORB Vocabulary
     cout << endl << "Loading ORB Vocabulary." << endl;
@@ -96,12 +96,12 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     mpFrameDrawer = new FrameDrawer(mpMap);
 
     // Initialize pointcloud mapping
-    mpPointCloudMapping = make_shared<PointCloudMapping>(resolution);
+    mpPointCloudMapper = new PointCloudMapping(resolution);
+    mptPointCloudMapping = new thread(&PointCloudMapping::Run, mpPointCloudMapper);
 
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
-    mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer,
-                             mpMap, mpPointCloudMapping, mpKeyFrameDatabase, strSettingsFile, mSensor);
+    mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMap, mpKeyFrameDatabase, strSettingsFile, mSensor);
 
     //Initialize the Local Mapping thread and launch
     mpLocalMapper = new LocalMapping(mpMap, mSensor==MONOCULAR);
@@ -114,6 +114,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     //Set pointers between threads
     mpTracker->SetLocalMapper(mpLocalMapper);
     mpTracker->SetLoopClosing(mpLoopCloser);
+    mpTracker->SetPointCloudMapping(mpPointCloudMapper);
 
     mpLocalMapper->SetTracker(mpTracker);
     mpLocalMapper->SetLoopCloser(mpLoopCloser);
@@ -125,6 +126,20 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
     PointCloudMap = boost::make_shared<PointCloud>();
     voxel.setLeafSize(0.05, 0.05, 0.05);
+
+    mTransCam2Ground.setIdentity();
+    mTransCam2Ground(0,0) = 0.0;
+    mTransCam2Ground(0,1) = 0.0;
+    mTransCam2Ground(0,2) = 1.0;
+    mTransCam2Ground(0,3) = 0.0;
+    mTransCam2Ground(1,0) = -1.0;
+    mTransCam2Ground(1,1) = 0.0;
+    mTransCam2Ground(1,2) = 0.0;
+    mTransCam2Ground(1,3) = 0.0;
+    mTransCam2Ground(2,0) = 0.0;
+    mTransCam2Ground(2,1) = -1.0;
+    mTransCam2Ground(2,2) = 0.0;
+    mTransCam2Ground(2,3) = 0.0;
 }
 
 void System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp)
@@ -304,11 +319,11 @@ void System::Shutdown()
 {
     mpLocalMapper->RequestFinish();
     mpLoopCloser->RequestFinish();
-    mpPointCloudMapping->shutdown();
+    mpPointCloudMapper->RequestFinish();
     // Wait until all thread have effectively stopped
-    while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
+    while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || !mpPointCloudMapper->isFinished() || mpLoopCloser->isRunningGBA())
     {
-        std::this_thread::sleep_for(std::chrono::microseconds(50000));
+        usleep(5000);
     }
 }
 
@@ -533,15 +548,13 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
 
     void System::SavePointCloudMap(const string &filename)
     {
-        vector<KeyFrame*> keyframes = mpPointCloudMapping->GetKeyFrames();
-        //vector<cv::Mat> colorImgs = mpPointCloudMapping->GetColorImgs();
-        vector<cv::Mat> depthImgs = mpPointCloudMapping->GetDepthImgs();
-        ;
+        vector<KeyFrame*> keyframes = mpPointCloudMapper->GetKeyFrames();
+        vector<cv::Mat> depthImgs = mpPointCloudMapper->GetDepthImgs();
+        vector<cv::Mat> colorImgs = mpPointCloudMapper->GetColorImgs();;
 
-        for(size_t i=0;i<keyframes.size();i++)// save the optimized pointcloud
+        for(size_t i=0; i<keyframes.size(); i+=2)// save the optimized pointcloud
         {
-            //PointCloud::Ptr tp = generatePointCloud( keyframes[i], colorImgs[i], depthImgs[i] );
-            PointCloud::Ptr tp = generatePointCloud( keyframes[i], depthImgs[i] );
+            PointCloud::Ptr tp = generatePointCloud( keyframes[i], colorImgs[i], depthImgs[i] );
             *PointCloudMap += *tp;
             tp->clear();
         }
@@ -549,95 +562,48 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
         voxel.setInputCloud( PointCloudMap );
         voxel.filter( *tmp );
         PointCloudMap->swap( *tmp );
+        tmp->clear();
+        PointCloud::Ptr tmp2(new PointCloud());
+        Eigen::Isometry3d transformation_matrix = Converter::toSE3Quat(Converter::toCvMat(mTransCam2Ground));
+        pcl::transformPointCloud(*PointCloudMap, *tmp2, mTransCam2Ground.matrix());
+        PointCloudMap->swap(*tmp2);
+        tmp2->clear();
         pcl::io::savePCDFileBinary (filename, *PointCloudMap );
         cout<<endl<<"Save point cloud file successfully!"<<endl;
     }
-    /*
-    void System::SaveOctoMap(const string &filename)
-    {
-        octomap::ColorOcTree tree(0.05);
-        for (auto p:(*PointCloudMap).points)
-            tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
 
-        for (auto p:(*PointCloudMap).points)
-            tree.integrateNodeColor( p.x, p.y, p.z, p.r, p.g, p.b );
-
-        tree.updateInnerOccupancy();
-        tree.write(filename);
-        cout << endl << "Converting point cloud into color octomap done." << endl;
-    }
-
-    pcl::PointCloud<PointT>::Ptr System::generatePointCloud(KeyFrame *kf, cv::Mat &color, cv::Mat &depth)
+    pcl::PointCloud<System::PointT>::Ptr System::generatePointCloud(KeyFrame *kf, cv::Mat &color, cv::Mat &depth)
     {
         PointCloud::Ptr tmp(new PointCloud());
-        for (int i = 0; i < depth.rows; i += 3)
+        for (int i = 0; i < depth.rows; i += 5)
         {
-            for (int j = 0; j < depth.cols; j += 3)
+            for (int j = 0; j < depth.cols; j += 5)
             {
                 float d = depth.ptr<float>(i)[j];
-                if (d < 0.01 || d > 10.0 || isnan(d))
+                if (d < 0.01 || d > 4.0 || isnan(d))
                     continue;
                 PointT p;
                 p.z = d;
                 p.x = (j - kf->cx) * p.z / kf->fx;
                 p.y = (i - kf->cy) * p.z / kf->fy;
-
-                p.r = color.ptr<uchar>(i)[j*3];
-                p.g = color.ptr<uchar>(i)[j*3+1];
-                p.b = color.ptr<uchar>(i)[j*3+2];
-
-                 tmp->points.push_back(p);
-            }
-        }
-
-
-        std::vector<int> mapping;
-        pcl::removeNaNFromPointCloud(*tmp, *tmp, mapping);
-        Eigen::Isometry3d T = Converter::toSE3Quat(kf->GetPose());
-        PointCloud::Ptr cloud(new PointCloud);
-
-        pcl::transformPointCloud(*tmp, *cloud, T.inverse().matrix());
-        cloud->is_dense = false;
-        return cloud;
-    }
-    */
-
-    pcl::PointCloud<System::PointT>::Ptr System::generatePointCloud(KeyFrame *kf, cv::Mat &depth)
-    {
-        PointCloud::Ptr tmp(new PointCloud());
-        for (int i = 0; i < depth.rows; i += 3)
-        {
-            for (int j = 0; j < depth.cols; j += 3)
-            {
-                float d = depth.ptr<float>(i)[j];
-                if (d < 0.01 || d > 10.0 || isnan(d))
+                if (p.x < -4.0 || p.x>4.0)     //pointcloud filter, 5m is farest boundary
                     continue;
-                PointT p;
-                p.z = d;
-                p.x = (j - kf->cx) * p.z / kf->fx;
-                p.y = (i - kf->cy) * p.z / kf->fy;
-
+                if (p.y < -4.0 || p.y>4.0)
+                    continue;
+                p.r = uchar(color.at<cv::Vec3b>(i,j)[0]);
+                p.g = uchar(color.at<cv::Vec3b>(i,j)[1]);
+                p.b = uchar(color.at<cv::Vec3b>(i,j)[2]);
                 tmp->points.push_back(p);
             }
         }
 
         Eigen::Isometry3d T = Converter::toSE3Quat(kf->GetPose());
-        PointCloud::Ptr cloud(new PointCloud);
+        PointCloud::Ptr cloud(new PointCloud());
 
         pcl::transformPointCloud(*tmp, *cloud, T.inverse().matrix());
         cloud->is_dense = false;
         return cloud;
     }
 
-    void System::SaveOctoMap(const string &filename)
-    {
-        octomap::OcTree tree(0.05);
-        for (auto p:(*PointCloudMap).points)
-            tree.updateNode(octomap::point3d(p.x, p.y, p.z), true);
-
-        tree.updateInnerOccupancy();
-        tree.writeBinary( filename );
-        cout << endl << "Converting point cloud into octomap done." << endl;
-    }
 
 } //namespace ORB_SLAM

@@ -34,7 +34,6 @@
 #include <pcl/visualization/pcl_visualizer.h>
 
 #include <octomap/octomap.h>
-#include <octomap/ColorOcTree.h>
 
 #include "Tracking.h"
 #include "FrameDrawer.h"
@@ -66,7 +65,7 @@ namespace ORB_SLAM2
             STEREO=1,
             RGBD=2
         };
-        typedef pcl::PointXYZ PointT;
+        typedef pcl::PointXYZRGB PointT;
         typedef pcl::PointCloud<PointT> PointCloud;
 
     public:
@@ -119,9 +118,8 @@ namespace ORB_SLAM2
         // See format details at: http://www.cvlibs.net/datasets/kitti/eval_odometry.php
         void SaveTrajectoryKITTI(const string &filename);
 
+        //Save PointCloudMap for Navigation
         void SavePointCloudMap(const string &filename);
-
-        void SaveOctoMap(const string &filename);
 
         //Checks the current mode (mapping or localization) and changes the mode if requested
         void EnableLocalizationOnly (bool localize_only);
@@ -146,7 +144,8 @@ namespace ORB_SLAM2
 
     private:
         //PointCloud::Ptr generatePointCloud(KeyFrame* kf, cv::Mat& color, cv::Mat& depth);
-        PointCloud::Ptr generatePointCloud(KeyFrame* kf, cv::Mat& depth);
+        PointCloud::Ptr generatePointCloud(KeyFrame* kf, cv::Mat& color, cv::Mat& depth);
+
         // This stops local mapping thread (map building) and performs only camera tracking.
         void ActivateLocalizationMode();
 
@@ -175,6 +174,8 @@ namespace ORB_SLAM2
         // Local Mapper. It manages the local map and performs local bundle adjustment.
         LocalMapping* mpLocalMapper;
 
+        PointCloudMapping* mpPointCloudMapper;
+
         // Loop Closer. It searches loops with every new keyframe. If there is a loop it performs
         // a pose graph optimization and full bundle adjustment (in a new thread) afterwards.
         LoopClosing* mpLoopCloser;
@@ -185,7 +186,7 @@ namespace ORB_SLAM2
         // The Tracking thread "lives" in the main execution thread that creates the System object.
         std::thread* mptLocalMapping;
         std::thread* mptLoopClosing;
-        shared_ptr<PointCloudMapping> mpPointCloudMapping;
+        std::thread* mptPointCloudMapping;
 
         // Reset flag
         std::mutex mMutexReset;
@@ -204,8 +205,12 @@ namespace ORB_SLAM2
 
         // Current position
         cv::Mat current_position_;
+
         PointCloud::Ptr PointCloudMap;
         pcl::VoxelGrid<PointT> voxel;
+
+        Eigen::Matrix4f mTransCam2Ground;
+        const double PI = 3.1415926535897932;
     };
 }// namespace ORB_SLAM
 #endif // SYSTEM_H
