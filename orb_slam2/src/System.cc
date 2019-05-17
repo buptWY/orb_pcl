@@ -605,5 +605,9 @@ void System::SaveKeyFrameTrajectoryTUM(const string &filename)
         return cloud;
     }
 
+    octomap::OcTree System::GetOctoMap()
+    {
+        return mpPointCloudMapper->GetOctoMap();
+    }
 
 } //namespace ORB_SLAM

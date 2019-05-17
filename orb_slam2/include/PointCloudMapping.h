@@ -14,7 +14,6 @@
 #include <pcl/io/pcd_io.h>
 
 #include <octomap/octomap.h>
-#include <octomap/ColorOcTree.h>
 
 #include <thread>
 #include <mutex>
@@ -24,7 +23,7 @@ using namespace ORB_SLAM2;
 class PointCloudMapping
 {
 public:
-    typedef pcl::PointXYZRGBA PointT;
+    typedef pcl::PointXYZRGB PointT;
     typedef pcl::PointCloud<PointT> PointCloud;
 
     PointCloudMapping(double resolution_);
@@ -41,6 +40,7 @@ public:
     vector<KeyFrame*> GetKeyFrames();
     vector<cv::Mat> GetColorImgs();
     vector<cv::Mat> GetDepthImgs();
+    octomap::OcTree GetOctoMap();
 
 protected:
     PointCloud::Ptr generatePointCloud(KeyFrame* kf, cv::Mat& color, cv::Mat& depth);
@@ -68,5 +68,7 @@ protected:
     pcl::VoxelGrid<PointT> mVoxel;
 
     double mResolution=0.05;
+
+    shared_ptr<octomap::OcTree> mpOctree;
 };
 #endif // POINTCLOUDMAPPING_H

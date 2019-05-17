@@ -142,6 +142,8 @@ namespace ORB_SLAM2
 
         std::vector<MapPoint*> GetAllMapPoints();
 
+        octomap::OcTree GetOctoMap();
+
     private:
         //PointCloud::Ptr generatePointCloud(KeyFrame* kf, cv::Mat& color, cv::Mat& depth);
         PointCloud::Ptr generatePointCloud(KeyFrame* kf, cv::Mat& color, cv::Mat& depth);

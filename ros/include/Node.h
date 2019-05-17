@@ -39,6 +39,10 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <geometry_msgs/PoseStamped.h>
 
+#include <octomap/octomap.h>
+#include <octomap_ros/conversions.h>
+#include <octomap_msgs/Octomap.h>
+#include <octomap_msgs/conversions.h>
 #include "System.h"
 
 
@@ -61,6 +65,8 @@ class Node
     void PublishPositionAsPoseStamped(cv::Mat position);
     void PublishRenderedImage (cv::Mat image);
     void ParamsChangedCallback(orb_slam2_ros::dynamic_reconfigureConfig &config, uint32_t level);
+    void PublishOctoMap(octomap::OcTree map );
+
     tf::Transform TransformFromMat (cv::Mat position_mat);
     sensor_msgs::PointCloud2 MapPointsToPointCloud (std::vector<ORB_SLAM2::MapPoint*> map_points);
 
@@ -69,6 +75,7 @@ class Node
     image_transport::Publisher rendered_image_publisher_;
     ros::Publisher map_points_publisher_;
     ros::Publisher pose_publisher_;
+    ros::Publisher octomap_publisher_;
 
     std::string name_of_node_;
     ros::NodeHandle node_handle_;
@@ -77,6 +84,8 @@ class Node
     std::string camera_frame_id_param_;
     bool publish_pointcloud_param_;
     bool publish_pose_param_;
+    bool publish_octomap_param_;
+
     int min_observations_per_point_;
 };
 

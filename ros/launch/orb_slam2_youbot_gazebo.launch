@@ -9,6 +9,7 @@
 
        <param name="publish_pointcloud" type="bool" value="true" />
        <param name="publish_pose" type="bool" value="true" />
+       <param name="publish_octomap" type="bool" value="true" />
        <param name="pointcloud_frame_id" type="string" value="map" />
        <param name="camera_frame_id" type="string" value="camera_link" />>
   </node>

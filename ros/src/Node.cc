@@ -11,6 +11,8 @@ Node::Node (ORB_SLAM2::System* pSLAM, ros::NodeHandle &node_handle, image_transp
   //static parameters
   node_handle_.param(name_of_node_+"/publish_pointcloud", publish_pointcloud_param_, true);
   node_handle_.param(name_of_node_+"/publish_pose", publish_pose_param_, true);
+  node_handle_.param(name_of_node_+"/publish_octomap", publish_octomap_param_, true);
+
   node_handle_.param<std::string>(name_of_node_+"/pointcloud_frame_id", map_frame_id_param_, "map");
   node_handle_.param<std::string>(name_of_node_+"/camera_frame_id", camera_frame_id_param_, "camera_link");
 
@@ -27,6 +29,10 @@ Node::Node (ORB_SLAM2::System* pSLAM, ros::NodeHandle &node_handle, image_transp
   // Enable publishing camera's pose as PoseStamped message
   if (publish_pose_param_) {
     pose_publisher_ = node_handle_.advertise<geometry_msgs::PoseStamped> (name_of_node_+"/pose", 1);
+  }
+
+  if(publish_octomap_param_){
+      octomap_publisher_ = node_handle_.advertise<octomap_msgs::Octomap> (name_of_node_+"/octomap", 1);
   }
 }
 
@@ -53,6 +59,10 @@ void Node::Update () {
     PublishMapPoints (orb_slam_->GetAllMapPoints());
   }
 
+  if (publish_octomap_param_) {
+      PublishOctoMap (orb_slam_->GetOctoMap());
+    }
+
 }
 
 
@@ -61,6 +71,13 @@ void Node::PublishMapPoints (std::vector<ORB_SLAM2::MapPoint*> map_points) {
   map_points_publisher_.publish (cloud);
 }
 
+void Node::PublishOctoMap(octomap::OcTree map ){
+    octomap_msgs::Octomap octo_msg;
+    octomap_msgs::fullMapToMsg(map, octo_msg);
+    octo_msg.header.stamp = current_frame_time_;
+    octo_msg.header.frame_id = map_frame_id_param_;
+    octomap_publisher_.publish(octo_msg);
+}
 
 void Node::PublishPositionAsTransform (cv::Mat position) {
   tf::Transform transform = TransformFromMat (position);

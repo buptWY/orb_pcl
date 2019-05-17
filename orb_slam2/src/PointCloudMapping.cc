@@ -24,6 +24,7 @@ PointCloudMapping::PointCloudMapping(double resolution_)
     mVoxel.setLeafSize(mResolution, mResolution, mResolution);
 
     mpPointCloudMap = boost::make_shared<PointCloud> ();
+    mpOctree = make_shared<octomap::OcTree>(resolution_);
 
     mTransCam2Ground.setIdentity();
     mTransCam2Ground(0,0) = 0.0;
@@ -86,7 +87,6 @@ pcl::PointCloud<PointCloudMapping::PointT>::Ptr PointCloudMapping::generatePoint
         for (int j = 0; j < depth.cols; j += 5)
         {
             float d = depth.ptr<float>(i)[j];
-            std::cout<<d<<std::endl;
             if (d < 0.01 || d > 4.0 || isnan(d))
                 continue;
             PointT p;
@@ -129,7 +129,13 @@ void PointCloudMapping::Run()
             for (size_t i = lastKeyframeSize; i < N; i++)
             {
                 PointCloud::Ptr p = generatePointCloud(keyframes[i], colorImgs[i], depthImgs[i]);
+                PointCloud::Ptr tmp(new PointCloud());
+                pcl::transformPointCloud(*p, *tmp, mTransCam2Ground.matrix());
+                p->swap(*tmp);
+                tmp->clear();
                 *mpPointCloudMap += *p;
+                for (auto pts:p->points)
+                    mpOctree->updateNode(octomap::point3d(pts.x, pts.y, pts.z), true );
                 p->clear();
             }
             PointCloud::Ptr tmp(new PointCloud());
@@ -144,12 +150,7 @@ void PointCloudMapping::Run()
             break;
         usleep(20);
     }
-    PointCloud::Ptr tmp(new PointCloud());
-    pcl::transformPointCloud(*mpPointCloudMap, *tmp, mTransCam2Ground.matrix());
-    mpPointCloudMap->swap(*tmp);
-    tmp->clear();
     pcl::io::savePCDFileBinary ( "/home/wangyang/result/IncrementalPointCloud.pcd", *mpPointCloudMap );
-
     SetFinish();
 }
 
@@ -172,4 +173,11 @@ vector<cv::Mat> PointCloudMapping::GetColorImgs()
 {
     unique_lock <mutex> lck(keyframeMutex);
     return colorImgs;
+}
+
+octomap::OcTree PointCloudMapping::GetOctoMap()
+{
+    unique_lock <mutex> lck(keyframeMutex);
+    mpOctree->updateInnerOccupancy();
+    return *mpOctree;
 }
